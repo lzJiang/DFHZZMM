@@ -7,7 +7,8 @@ CLASS zcl_mmi003_util DEFINITION
     METHODS check_0001
       IMPORTING ls_req TYPE zzs_mmi003_in
       EXPORTING flag   TYPE bapi_mtype
-                msg    TYPE bapi_msg.
+                msg    TYPE bapi_msg
+                lt_zzt_mmi003_out TYPE zzt_mmi003_out.
     METHODS deal_0001
       EXPORTING flag   TYPE bapi_mtype
                 msg    TYPE bapi_msg
@@ -27,13 +28,17 @@ CLASS zcl_mmi003_util DEFINITION
       EXPORTING flag   TYPE bapi_mtype
                 msg    TYPE bapi_msg
       CHANGING  ls_req TYPE zzs_mmi003_0002_in.
+    METHODS deal_jhwc
+      EXPORTING flag   TYPE bapi_mtype
+                msg    TYPE bapi_msg
+      CHANGING  lt_req TYPE zzt_mmi003_0002_in.
 PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
+CLASS zcl_mmi003_util IMPLEMENTATION.
 
 
   METHOD check_0001.
@@ -56,6 +61,27 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
       IF sy-subrc = 0.
         flag = 'E'.
         msg = |'外部系统单号'{ ls_req-outbillno }'已存在对应SAP采购订单'{ ls_purchaseorder-purchaseorder }',请勿重复创建' |.
+        DATA:lt_zztmm_0001 TYPE TABLE OF zztmm_0001.
+        SELECT a~purchaseorder,
+               b~purchaseorderitem,
+               a~supplierrespsalespersonname AS outbillno,
+               b~suppliermaterialnumber AS outbillitemno,
+               b~material
+          FROM i_purchaseorderapi01 WITH PRIVILEGED ACCESS AS a
+          INNER JOIN i_purchaseorderitemapi01  WITH PRIVILEGED ACCESS AS b
+            ON a~purchaseorder = b~purchaseorder
+         WHERE a~supplierrespsalespersonname = @ls_req-outbillno
+           AND b~purchasingdocumentdeletioncode = ''
+          INTO TABLE @DATA(lt_data).
+        LOOP AT lt_data ASSIGNING FIELD-SYMBOL(<fs_data>).
+          CLEAR:<fs_data>-outbillitemno.
+          <fs_data>-material = |{ <fs_data>-material ALPHA = OUT }|.
+          READ TABLE ls_req-topurchaseorderitem[] INTO DATA(ls_item1) WITH KEY material = <fs_data>-material.
+          IF sy-subrc = 0.
+            <fs_data>-outbillitemno = ls_item1-outbillitemno.
+          ENDIF.
+        ENDLOOP.
+        lt_zzt_mmi003_out = CORRESPONDING #( DEEP lt_data ).
         RETURN.
       ENDIF.
     ENDIF.
@@ -101,7 +127,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
         msg = |'行'{ ls_item-outbillitemno }'【订单数量】不能为空'| .
         RETURN.
       ENDIF.
-      IF ls_item-material IS INITIAL and ls_req-purchaseordertype NE 'ZT4'.
+      IF ls_item-material IS INITIAL AND ls_req-purchaseordertype NE 'ZT4'.
         flag = 'E'.
         msg = |'行' { ls_item-outbillitemno } '【物料】不能为空'|.
         RETURN.
@@ -179,6 +205,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
             subcontractor                  TYPE string,
             supplierissubcontractor        TYPE abap_bool,
             unlimitedoverdeliveryisallowed TYPE abap_bool,
+            purchasingitemisfreeofcharge   TYPE abap_bool,
             to_scheduleline                TYPE TABLE OF  ty_toscheduleline WITH DEFAULT KEY,
             to_purorderpricingelement      TYPE TABLE OF  ty_topurorderpricingelement WITH DEFAULT KEY,
             to_accountassignment           TYPE TABLE OF  ty_toaccountassignment WITH DEFAULT KEY,
@@ -192,6 +219,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
             companycode                 TYPE string,
             purchasinggroup             TYPE string,
             supplier                    TYPE string,
+            supplyingplant              TYPE string,
             paymentterms                TYPE string,
             to_purchaseorderitem        TYPE TABLE OF  ty_topurchaseorderitem WITH DEFAULT KEY,
           END OF ty_topurchaseorder.
@@ -201,6 +229,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
          lv_pricequalen TYPE i,
          lv_price_6     TYPE p DECIMALS 6,
          lv_price_2     TYPE p DECIMALS 2,
+         lv_price       TYPE p DECIMALS 6,
          lv_bs          TYPE i.
     DATA:lv_json TYPE string.
     DATA:lt_mapping TYPE /ui2/cl_json=>name_mappings.
@@ -228,6 +257,15 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
     ls_send-companycode = ls_req-companycode.
     ls_send-purchaseordertype = ls_req-purchaseordertype.
     ls_send-supplier = ls_req-supplier.
+    IF strlen( ls_req-supplier ) = 4.
+      SELECT SINGLE *
+             FROM i_plant WITH PRIVILEGED ACCESS
+            WHERE plant = @ls_req-supplier
+             INTO @DATA(ls_plant).
+      IF sy-subrc = 0.
+        ls_send-supplyingplant = ls_req-supplier.
+      ENDIF.
+    ENDIF.
     ls_send-purchasingorganization = ls_req-purchasingorganization.
     ls_send-purchasinggroup = ls_req-purchasinggroup.
     lv_supplier = ls_req-supplier.
@@ -279,42 +317,48 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
         <fs_accountassignment>-quantity = '1'.
 *        <fs_accountassignment>-accountassignmentnumber = '1'.
       ENDIF.
-      APPEND INITIAL LINE TO <fs_item>-to_purorderpricingelement ASSIGNING FIELD-SYMBOL(<fs_price>).
-      <fs_price>-conditiontype = 'PMP0'.
-      CONDENSE ls_req_item-netpriceamount NO-GAPS.
-      <fs_price>-conditionrateamount = ls_req_item-netpriceamount.
-      SPLIT <fs_price>-conditionrateamount AT '.' INTO TABLE DATA(lt_conditionrateamount).
-      lv_pricequalen = 1.
-      lv_bs          = 1.
-      READ TABLE lt_conditionrateamount INTO DATA(ls_conditionrateamount) INDEX 2.
-      IF sy-subrc = 0.
-        IF strlen( ls_conditionrateamount ) > 2.
-          DATA(lv_len) = strlen( ls_conditionrateamount ).
-          lv_pricequalen = ( lv_len - 2 ).
-          DO lv_pricequalen TIMES.
-            lv_bs = lv_bs * 10.
-          ENDDO.
-        ENDIF.
-      ENDIF.
-      lv_price_6 = <fs_price>-conditionrateamount.
-      lv_price_6 = lv_price_6 * lv_bs.
-      lv_price_2 = lv_price_6.
-      <fs_price>-conditionrateamount = lv_price_2.
-      CONDENSE <fs_price>-conditionrateamount NO-GAPS.
-      <fs_price>-conditionquantity = lv_bs.
-      CONDENSE <fs_price>-conditionquantity NO-GAPS.
-      IF ls_supplierpurchasingorg-calculationschemagroupcode = '01'.
-        <fs_price>-pricingprocedurestep = '080'.
+      lv_price = ls_req_item-netpriceamount.
+      IF lv_price = 0.
+        <fs_item>-purchasingitemisfreeofcharge = 'X'.
       ELSE.
-        <fs_price>-pricingprocedurestep = '060'.
+        APPEND INITIAL LINE TO <fs_item>-to_purorderpricingelement ASSIGNING FIELD-SYMBOL(<fs_price>).
+        <fs_price>-conditiontype = 'PMP0'.
+        CONDENSE ls_req_item-netpriceamount NO-GAPS.
+        <fs_price>-conditionrateamount = ls_req_item-netpriceamount.
+        SPLIT <fs_price>-conditionrateamount AT '.' INTO TABLE DATA(lt_conditionrateamount).
+        lv_pricequalen = 1.
+        lv_bs          = 1.
+        READ TABLE lt_conditionrateamount INTO DATA(ls_conditionrateamount) INDEX 2.
+        IF sy-subrc = 0.
+          IF strlen( ls_conditionrateamount ) > 2.
+            DATA(lv_len) = strlen( ls_conditionrateamount ).
+            lv_pricequalen = ( lv_len - 2 ).
+            DO lv_pricequalen TIMES.
+              lv_bs = lv_bs * 10.
+            ENDDO.
+          ENDIF.
+        ENDIF.
+        lv_price_6 = <fs_price>-conditionrateamount.
+        lv_price_6 = lv_price_6 * lv_bs.
+        lv_price_2 = lv_price_6.
+        <fs_price>-conditionrateamount = lv_price_2.
+        CONDENSE <fs_price>-conditionrateamount NO-GAPS.
+        <fs_price>-conditionquantity = lv_bs.
+        CONDENSE <fs_price>-conditionquantity NO-GAPS.
+        IF ls_supplierpurchasingorg-calculationschemagroupcode = '01'.
+          <fs_price>-pricingprocedurestep = '080'.
+        ELSE.
+          <fs_price>-pricingprocedurestep = '060'.
+        ENDIF.
+        <fs_price>-pricingprocedurecounter = '001'.
+        APPEND INITIAL LINE TO <fs_item>-to_purorderpricingelement ASSIGNING <fs_price>.
+        <fs_price>-conditiontype = 'ZP01'.
+        <fs_item>-taxcode = ls_req_item-taxcode.
+        <fs_price>-conditionrateamount = zcl_com_util=>get_taxrate_by_code( ls_req_item-taxcode ).
+        <fs_price>-pricingprocedurestep = '820'.
+        <fs_price>-pricingprocedurecounter = '001'.
       ENDIF.
-      <fs_price>-pricingprocedurecounter = '001'.
-      APPEND INITIAL LINE TO <fs_item>-to_purorderpricingelement ASSIGNING <fs_price>.
-      <fs_price>-conditiontype = 'ZP01'.
-      <fs_item>-taxcode = ls_req_item-taxcode.
-      <fs_price>-conditionrateamount = zcl_com_util=>get_taxrate_by_code( ls_req_item-taxcode ).
-      <fs_price>-pricingprocedurestep = '820'.
-      <fs_price>-pricingprocedurecounter = '001'.
+
 
       APPEND INITIAL LINE TO <fs_item>-to_scheduleline ASSIGNING FIELD-SYMBOL(<fs_scheduleline>).
       <fs_scheduleline>-schedulelinedeliverydate = ls_req_item-schedulelinedeliverydate.
@@ -401,6 +445,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
            ( abap = 'CompanyCode'                           json = 'CompanyCode'                       )
            ( abap = 'PurchaseOrderType'                     json = 'PurchaseOrderType'                 )
            ( abap = 'Supplier'                              json = 'Supplier'                          )
+           ( abap = 'SupplyingPlant'                        json = 'SupplyingPlant'                    )
            ( abap = 'PurchasingOrganization'                json = 'PurchasingOrganization'            )
            ( abap = 'PurchasingGroup'                       json = 'PurchasingGroup'                   )
 
@@ -421,6 +466,7 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
            ( abap = 'Subcontractor'                         json = 'Subcontractor'                     )
            ( abap = 'SupplierIsSubcontractor'               json = 'SupplierIsSubcontractor'           )
            ( abap = 'UnlimitedOverdeliveryIsAllowed'        json = 'UnlimitedOverdeliveryIsAllowed'    )
+           ( abap = 'PurchasingItemIsFreeOfCharge'          json = 'PurchasingItemIsFreeOfCharge'    )
 
            ( abap = 'to_ScheduleLine'                       json = 'to_ScheduleLine'                   )
            ( abap = 'ScheduleLineOrderQuantity'             json = 'ScheduleLineOrderQuantity'         )
@@ -695,25 +741,29 @@ CLASS ZCL_MMI003_UTIL IMPLEMENTATION.
   ENDMETHOD.
 
 
- METHOD  save_zztmm_0001.
-   DATA:lt_zztmm_0001 TYPE TABLE OF zztmm_0001.
-   SELECT a~purchaseorder,
-          b~purchaseorderitem,
-          a~supplierrespsalespersonname AS outbillno,
-          b~suppliermaterialnumber AS outbillitemno
-     FROM i_purchaseorderapi01 WITH PRIVILEGED ACCESS AS a
-     INNER JOIN i_purchaseorderitemapi01  WITH PRIVILEGED ACCESS AS b
-       ON a~purchaseorder = b~purchaseorder
-    WHERE a~purchaseorder = @lv_purchaseorder
-      AND b~purchasingdocumentdeletioncode = ''
-     INTO TABLE @DATA(lt_data).
-   lt_zzt_mmi003_out = CORRESPONDING #( DEEP lt_data ).
-   lt_zztmm_0001 = CORRESPONDING #( DEEP lt_data ).
-   LOOP AT lt_zztmm_0001 ASSIGNING FIELD-SYMBOL(<fs_zztmm_0001>).
-     <fs_zztmm_0001>-zdate = cl_abap_context_info=>get_system_date( ).
-     <fs_zztmm_0001>-ztime = cl_abap_context_info=>get_system_time( ).
-     <fs_zztmm_0001>-zuser = cl_abap_context_info=>get_user_technical_name( ).
-   ENDLOOP.
-   MODIFY zztmm_0001 FROM TABLE @lt_zztmm_0001.
- ENDMETHOD.
+  METHOD  save_zztmm_0001.
+    DATA:lt_zztmm_0001 TYPE TABLE OF zztmm_0001.
+    SELECT a~purchaseorder,
+           b~purchaseorderitem,
+           a~supplierrespsalespersonname AS outbillno,
+           b~suppliermaterialnumber AS outbillitemno
+      FROM i_purchaseorderapi01 WITH PRIVILEGED ACCESS AS a
+      INNER JOIN i_purchaseorderitemapi01  WITH PRIVILEGED ACCESS AS b
+        ON a~purchaseorder = b~purchaseorder
+     WHERE a~purchaseorder = @lv_purchaseorder
+       AND b~purchasingdocumentdeletioncode = ''
+      INTO TABLE @DATA(lt_data).
+    lt_zzt_mmi003_out = CORRESPONDING #( DEEP lt_data ).
+    lt_zztmm_0001 = CORRESPONDING #( DEEP lt_data ).
+    LOOP AT lt_zztmm_0001 ASSIGNING FIELD-SYMBOL(<fs_zztmm_0001>).
+      <fs_zztmm_0001>-zdate = cl_abap_context_info=>get_system_date( ).
+      <fs_zztmm_0001>-ztime = cl_abap_context_info=>get_system_time( ).
+      <fs_zztmm_0001>-zuser = cl_abap_context_info=>get_user_technical_name( ).
+    ENDLOOP.
+    MODIFY zztmm_0001 FROM TABLE @lt_zztmm_0001.
+  ENDMETHOD.
+  METHOD deal_jhwc.
+
+  ENDMETHOD.
+
 ENDCLASS.

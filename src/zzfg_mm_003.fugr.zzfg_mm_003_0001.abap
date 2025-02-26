@@ -17,7 +17,8 @@ FUNCTION zzfg_mm_003_0001.
   CREATE OBJECT lo_util.
   lo_util->check_0001( EXPORTING ls_req = ls_req
                        IMPORTING flag = gv_flag
-                                 msg  = gv_msg ).
+                                 msg  = gv_msg
+                                 lt_zzt_mmi003_out = o_resp-res ).
   IF gv_flag = 'E'.
     o_resp-msgty = 'E'.
     o_resp-msgtx = gv_msg .

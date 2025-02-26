@@ -26,7 +26,7 @@ FUNCTION zzfm_mm_004.
           results TYPE TABLE OF ty_item WITH EMPTY KEY,
         END OF tty_item,
         BEGIN OF ty_data,
-          documentheadertext            TYPE string,
+          documentheadertext            TYPE bktxt,
           companycode                   TYPE string,
           documentdate                  TYPE string,
           postingdate                   TYPE string,
@@ -45,8 +45,10 @@ FUNCTION zzfm_mm_004.
   DATA:lv_json TYPE string.
   DATA:lt_mapping TYPE /ui2/cl_json=>name_mappings.
 
-  DATA:ls_data    TYPE ty_data,
-       ls_results TYPE ty_item.
+  DATA:ls_data     TYPE ty_data,
+       ls_results  TYPE ty_item,
+       lv_material TYPE matnr,
+       lv_count    TYPE i.
 
   DATA(ls_req) = i_req-req.
 *&---=============================使用API 步骤01
@@ -62,6 +64,7 @@ FUNCTION zzfm_mm_004.
        ( abap = 'SupplierInvoiceIDByInvcgParty'  json = 'SupplierInvoiceIDByInvcgParty'   )
        ( abap = 'DocumentHeaderText'             json = 'DocumentHeaderText'                )
        ( abap = 'InvoicingParty'                 json = 'InvoicingParty'                )
+       ( abap = 'TaxCode'                        json = 'TaxCode'                )
        ( abap = 'InvoiceGrossAmount'             json = 'InvoiceGrossAmount'                )
        ( abap = 'DueCalculationBaseDate'         json = 'DueCalculationBaseDate'                )
        ( abap = 'TaxIsCalculatedAutomatically'   json = 'TaxIsCalculatedAutomatically'                )
@@ -112,13 +115,18 @@ FUNCTION zzfm_mm_004.
   "发票总含税金额
   ls_data-invoicegrossamount = ls_req-head-invoicegrossamount.
 
+  data(lv_date_now) = cl_abap_context_info=>get_system_date( ).
+  ls_req-head-duecalculationbasedate = lv_date_now.
   ls_data-duecalculationbasedate =  zzcl_comm_tool=>date2iso( ls_req-head-duecalculationbasedate ).
 
   ls_data-taxiscalculatedautomatically = ls_req-head-taxiscalculatedautomatically.
   ls_data-supplierinvoicestatus = ls_req-head-supplierinvoicestatus.
-  ls_data-taxdeterminationdate = zzcl_comm_tool=>date2iso( ls_req-head-taxdeterminationdate ).
+  ls_data-taxdeterminationdate = zzcl_comm_tool=>date2iso( ls_req-head-postingdate ).
 
   LOOP AT ls_req-item INTO DATA(ls_item).
+    CLEAr:lv_material.
+    zcl_com_util=>matnr_zero_in( EXPORTING input = ls_item-purchaseorderitem
+                                 IMPORTING output =  lv_material ).
     SELECT SINGLE b~*
         FROM i_materialdocumentheader_2 WITH PRIVILEGED ACCESS AS a
         INNER JOIN i_materialdocumentitem_2 WITH PRIVILEGED ACCESS AS b
@@ -126,18 +134,22 @@ FUNCTION zzfm_mm_004.
        WHERE materialdocumentheadertext = @ls_item-referencedocument
          AND b~goodsmovementiscancelled = ''
          AND b~reversedmaterialdocument = ''
+         AND b~Material = @lv_material
         INTO @DATA(ls_materialdocumentitem).
     IF sy-subrc = 0.
       ls_item-referencedocument = ls_materialdocumentitem-materialdocument.
       ls_item-referencedocumentfiscalyear = ls_materialdocumentitem-materialdocumentyear.
       ls_item-referencedocumentitem = ls_materialdocumentitem-materialdocumentitem.
+      ls_item-purchaseorderitem  = ls_materialdocumentitem-purchaseorderitem.
     ELSE.
       o_resp-msgty = 'E'.
-      o_resp-msgtx = |未找到WMS入库单【{ ls_item-referencedocument }】对应SAP物料凭证，请联系WMS管理员|.
+      o_resp-msgtx = |未找到WMS入库单【{ ls_item-referencedocument }】产品【{ ls_item-purchaseorderitem }】对应SAP物料凭证行，请联系WMS管理员|.
       RETURN.
     ENDIF.
     CLEAR:ls_results.
     MOVE-CORRESPONDING ls_item TO ls_results.
+    lv_count = lv_count + 1.
+    ls_results-supplierinvoiceitem = lv_count.
     APPEND ls_results TO ls_data-to_suplrinvcitempurordref-results.
   ENDLOOP.
 
@@ -171,7 +183,7 @@ FUNCTION zzfm_mm_004.
       IF status-code = '201'.
         TYPES:BEGIN OF ty_heads,
                 supplierinvoice TYPE string,
-                fiscalyear TYPE string,
+                fiscalyear      TYPE string,
               END OF ty_heads,
               BEGIN OF ty_ress,
                 d TYPE ty_heads,

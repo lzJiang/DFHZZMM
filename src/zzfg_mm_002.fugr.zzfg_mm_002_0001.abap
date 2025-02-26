@@ -44,7 +44,7 @@ FUNCTION zzfg_mm_002_0001.
            banknumber               TYPE string,
            bankaccountholdername    TYPE string,
            bankaccount              TYPE string,
-           bankaccountname          type string,
+           bankaccountname          TYPE string,
            bankaccountreferencetext TYPE string,
          END OF ty_businesspartnerbank,
 
@@ -108,6 +108,10 @@ FUNCTION zzfg_mm_002_0001.
     o_resp-msgty = 'E'.
     o_resp-msgtx = |【供应商简称】字段不能为空| .
     RETURN.
+  ELSE.
+    IF strlen( ls_req-searchterm1 ) > 20.
+      ls_req-searchterm1 = ls_req-searchterm1+0(20).
+    ENDIF.
   ENDIF.
   IF ls_req-bptaxlongnumber IS INITIAL.
     o_resp-msgty = 'E'.
@@ -124,16 +128,16 @@ FUNCTION zzfg_mm_002_0001.
     o_resp-msgtx = |【供应商统驭科目】字段不能为空| .
     RETURN.
   ENDIF.
-  IF ls_req-bankaccount IS INITIAL.
-    o_resp-msgty = 'E'.
-    o_resp-msgtx = |【供应商银行账号】字段不能为空| .
-    RETURN.
-  ENDIF.
-  IF ls_req-bankname IS INITIAL.
-    o_resp-msgty = 'E'.
-    o_resp-msgtx = |【供应商银行名称】字段不能为空| .
-    RETURN.
-  ENDIF.
+*  IF ls_req-bankaccount IS INITIAL.
+*    o_resp-msgty = 'E'.
+*    o_resp-msgtx = |【供应商银行账号】字段不能为空| .
+*    RETURN.
+*  ENDIF.
+*  IF ls_req-bankname IS INITIAL.
+*    o_resp-msgty = 'E'.
+*    o_resp-msgtx = |【供应商银行名称】字段不能为空| .
+*    RETURN.
+*  ENDIF.
   "判断创建还是修改
   SELECT COUNT(*)
     FROM i_businesspartner WITH PRIVILEGED ACCESS
@@ -271,6 +275,18 @@ FUNCTION zzfg_mm_002_0001.
          ) TO ls_data-to_businesspartnerbank.
       ENDIF.
       "采购-采购组织视图
+      SELECT DISTINCT purchasingorganization
+        FROM i_purchasingorganization
+        INTO TABLE @DATA(lt_purchasingorganization).
+*      LOOP AT lt_purchasingorganization ASSIGNING FIELD-SYMBOL(<fs_purchasingorganization>).
+*        ls_data-to_supplier-to_supplierpurchasingorg = VALUE #( BASE ls_data-to_supplier-to_supplierpurchasingorg
+*                                                                ( purchasingorganization = '1100'
+*                                                                currency      = ls_req-currency
+*                                                                paymentterms  = ls_req-paymentterms             "
+*                                                                incotermsclassification = 'DAP'
+*                                                                incotermslocation1 = ls_req-organizationbpname1
+*                                                                invoiceisgoodsreceiptbased = 'X' ) ).
+*      ENDLOOP.
       ls_data-to_supplier-to_supplierpurchasingorg = VALUE #( ( purchasingorganization = '1100'
                                                                 currency      = ls_req-currency
                                                                 paymentterms  = ls_req-paymentterms             "
@@ -294,11 +310,40 @@ FUNCTION zzfg_mm_002_0001.
                                                                 paymentterms  = ls_req-paymentterms             "
                                                                 incotermsclassification = 'DAP'
                                                                 incotermslocation1 = ls_req-organizationbpname1
+                                                                invoiceisgoodsreceiptbased = 'X' )
+                                                              ( purchasingorganization = '3260'
+                                                                currency      = ls_req-currency
+                                                                paymentterms  = ls_req-paymentterms             "
+                                                                incotermsclassification = 'DAP'
+                                                                incotermslocation1 = ls_req-organizationbpname1
+                                                                invoiceisgoodsreceiptbased = 'X' )
+                                                              ( purchasingorganization = '3270'
+                                                                currency      = ls_req-currency
+                                                                paymentterms  = ls_req-paymentterms             "
+                                                                incotermsclassification = 'DAP'
+                                                                incotermslocation1 = ls_req-organizationbpname1
+                                                                invoiceisgoodsreceiptbased = 'X' )
+                                                              ( purchasingorganization = '6001'
+                                                                currency      = ls_req-currency
+                                                                paymentterms  = ls_req-paymentterms             "
+                                                                incotermsclassification = 'DAP'
+                                                                incotermslocation1 = ls_req-organizationbpname1
                                                                 invoiceisgoodsreceiptbased = 'X' ) ).
 
 
 
       "采购-公司代码视图
+      SELECT DISTINCT companycode
+        FROM i_companycode
+        INTO TABLE @DATA(lt_companycode).
+*      LOOP AT lt_companycode ASSIGNING FIELD-SYMBOL(<fs_companycode>).
+*        ls_data-to_supplier-to_suppliercompany = VALUE #(  BASE ls_data-to_supplier-to_suppliercompany
+*                                                           (  companycode            = <fs_companycode>-companycode           "公司代码
+*                                                           paymentterms           = ls_req-paymentterms           "付款条件
+*                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+*                                                           layoutsortingrule      = '009'
+*                                                           istobecheckedforduplicates = 'X' ) ).
+*      ENDLOOP.
       ls_data-to_supplier-to_suppliercompany = VALUE #( (  companycode            = '1100'           "公司代码
                                                            paymentterms           = ls_req-paymentterms           "付款条件
                                                            reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
@@ -315,6 +360,76 @@ FUNCTION zzfg_mm_002_0001.
                                                            layoutsortingrule      = '009'
                                                            istobecheckedforduplicates = 'X' )
                                                         (  companycode            = '4100'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3260'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3270'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '6001'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3110'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3120'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3130'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3140'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3150'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3200'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3210'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3220'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3230'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3240'           "公司代码
+                                                           paymentterms           = ls_req-paymentterms           "付款条件
+                                                           reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
+                                                           layoutsortingrule      = '009'
+                                                           istobecheckedforduplicates = 'X' )
+                                                        (  companycode            = '3250'           "公司代码
                                                            paymentterms           = ls_req-paymentterms           "付款条件
                                                            reconciliationaccount  = ls_req-reconciliationaccount     "统驭科目
                                                            layoutsortingrule      = '009'

@@ -79,6 +79,13 @@ CLASS ZZCL_JOB_MM001 IMPLEMENTATION.
            AND a~inventoryusabilitycode NE 'X'
            AND a~goodsmovementtype = '101'
           APPENDING TABLE @lt_zztmm_0005.
+        "3.获取101入库非限制转541O由于锁定相关错误处理失败的数据增量处理数据
+        SELECT a~*
+          FROM zztmm_0005 WITH PRIVILEGED ACCESS AS a
+         WHERE a~flag = 'E'
+           AND a~msg like '%锁定%'
+           AND a~goodsmovementtype = '101'
+          APPENDING TABLE @lt_zztmm_0005.
         IF lt_zztmm_0005[] IS INITIAL.
           l_log->add_item( item = cl_bali_free_text_setter=>create( severity = if_bali_constants=>c_severity_information
                                                           text = '未获取增量数据！' ) ).
@@ -115,7 +122,7 @@ CLASS ZZCL_JOB_MM001 IMPLEMENTATION.
           && |-{ ls_zztmm_0005-materialdocumentyear }-{ ls_zztmm_0005-materialdocumentitem }|
           && |物料{ ls_zztmm_0005-material }供应商{ ls_zztmm_0005-supplier }数量{ ls_zztmm_0005-quantityinentryunit541 }|
           && |检验批【{ ls_zztmm_0005-inspectionlot }】|.
-          l_log->add_item( item = cl_bali_free_text_setter=>create( severity = if_bali_constants=>c_severity_information
+          l_log->add_item( item = cl_bali_free_text_setter=>create( severity = if_bali_constants=>c_severity_status
                                                 text = lv_text ) ).
           trans541o( IMPORTING flag = lv_flag
                                msg  = lv_msg
@@ -133,7 +140,7 @@ CLASS ZZCL_JOB_MM001 IMPLEMENTATION.
           && |-{ ls_zztmm_0005-materialdocumentyear }-{ ls_zztmm_0005-materialdocumentitem }|
           && |物料{ ls_zztmm_0005-material }供应商{ ls_zztmm_0005-supplier }数量{ ls_zztmm_0005-quantityinentryunit541 }|
           && |检验批【{ ls_zztmm_0005-inspectionlot }】|.
-          l_log->add_item( item = cl_bali_free_text_setter=>create( severity = if_bali_constants=>c_severity_information
+          l_log->add_item( item = cl_bali_free_text_setter=>create( severity = if_bali_constants=>c_severity_status
                                                 text = lv_text ) ).
         ENDLOOP.
 
